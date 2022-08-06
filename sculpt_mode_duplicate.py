@@ -4,8 +4,8 @@
 bl_info = {
     "name": "Sculpt Mode Duplicate",
     "author": "mchar",
-    "version": (0, 2),
-    "blender": (3, 10, 0),
+    "version": (0, 2, 1),
+    "blender": (3, 1, 0),
     "location": "View3D > Sculpt > Duplicate Sculpt Object",
     "description": "Duplicates Active Sculpt Mesh",
     "warning": "",
@@ -23,13 +23,22 @@ def find_mesh():
             return ("Selected first mesh object found")
 
 def main(context):
-    bpy.ops.sculpt.sculptmode_toggle()
-    if len(bpy.context.selected_objects) == 0:
-        find_mesh()
-    bpy.ops.object.duplicate_move('INVOKE_DEFAULT')
-    bpy.ops.sculpt.sculptmode_toggle()
-
-
+    #if x-sym is disabled, new object will be repositioned along with it's origin
+    if bpy.context.object.use_mesh_mirror_x == False:
+        bpy.ops.sculpt.sculptmode_toggle()
+        if len(bpy.context.selected_objects) == 0:
+            find_mesh()
+        bpy.ops.object.duplicate_move('INVOKE_DEFAULT')
+        bpy.ops.sculpt.sculptmode_toggle()
+    #if x-sym is enabled, new remain in position and just the mesh will be translated
+    elif bpy.context.object.use_mesh_mirror_x == True:
+        bpy.ops.sculpt.sculptmode_toggle()
+        if len(bpy.context.selected_objects) == 0:
+            find_mesh()
+        bpy.ops.object.duplicate()
+        bpy.ops.sculpt.sculptmode_toggle()
+        bpy.ops.transform.translate('INVOKE_DEFAULT')
+        
 class SculptModeDuplicate(bpy.types.Operator):
     """Duplicates the Active Mesh in Sculpt Mode"""
     bl_idname = "sculpt.sculpt_mode_duplicate"
