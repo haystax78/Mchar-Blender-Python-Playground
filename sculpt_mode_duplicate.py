@@ -24,17 +24,14 @@ def find_mesh():
 
 def main(context):
     #if x-sym is disabled, new object will be repositioned along with it's origin
+    bpy.ops.sculpt.sculptmode_toggle()
+    if len(bpy.context.selected_objects) == 0:
+        find_mesh()    
     if bpy.context.object.use_mesh_mirror_x == False:
-        bpy.ops.sculpt.sculptmode_toggle()
-        if len(bpy.context.selected_objects) == 0:
-            find_mesh()
         bpy.ops.object.duplicate_move('INVOKE_DEFAULT')
         bpy.ops.sculpt.sculptmode_toggle()
-    #if x-sym is enabled, new remain in position and just the mesh will be translated
+    #if x-sym is enabled, new object origin will remain in position and only the mesh data will be translated
     elif bpy.context.object.use_mesh_mirror_x == True:
-        bpy.ops.sculpt.sculptmode_toggle()
-        if len(bpy.context.selected_objects) == 0:
-            find_mesh()
         bpy.ops.object.duplicate()
         bpy.ops.sculpt.sculptmode_toggle()
         bpy.ops.transform.translate('INVOKE_DEFAULT')
