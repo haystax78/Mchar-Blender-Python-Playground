@@ -1,10 +1,10 @@
 #Addon that allow duplication and movement of active mesh object from inside Sculpt mode.
-#Find in the sculpt menu. Works best when bound to a hotkey.
+#Find in the sculpt menu. Works best when bound to a hotkey (I use shift+D).
 
 bl_info = {
     "name": "Sculpt Mode Duplicate",
     "author": "mchar",
-    "version": (0, 2, 1),
+    "version": (0, 2, 2),
     "blender": (3, 1, 0),
     "location": "View3D > Sculpt > Duplicate Sculpt Object",
     "description": "Duplicates Active Sculpt Mesh",
@@ -40,6 +40,7 @@ class SculptModeDuplicate(bpy.types.Operator):
     """Duplicates the Active Mesh in Sculpt Mode"""
     bl_idname = "sculpt.sculpt_mode_duplicate"
     bl_label = "Sculpt Mode Duplicate [mchar]"
+    bl_options = {'REGISTER'}
 
     def execute(self, context):
         main(context)
@@ -52,16 +53,6 @@ def register():
     bpy.utils.register_class(SculptModeDuplicate)
     bpy.types.VIEW3D_MT_sculpt.append(menu_func)
 
-
-
 def unregister():
     bpy.utils.unregister_class(SculptModeDuplicate)
     bpy.types.VIEW3D_MT_sculpt.remove(menu_func)
-
-
-
-if __name__ == "__main__":
-    register()
-
-    # test call
-    #bpy.ops.object.sculpt_mode_duplicate()
