@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Triangulate to Target",
     "author": "MattGPT",
-    "version": (1, 0),
+    "version": (1, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Object Menu",
     "description": "Optimizes quad face triangulation based on distance to a target surface",
@@ -281,40 +281,44 @@ if __name__ == "__main__":
     register()
 
 def get_closest_point_on_target(point, target_obj, face_normal, max_distance):
-    """Find the closest point on the target object's surface"""
+    """Find the closest point on the target object's surface, considering only front-facing normals"""
     # Convert point to target object's local space
     local_point = target_obj.matrix_world.inverted() @ point
+    local_normal = (target_obj.matrix_world.inverted().transposed() @ face_normal).normalized()
     
     # Create BVHTree for target object
     bm_target = bmesh.new()
     bm_target.from_mesh(target_obj.data)
     bvh = BVHTree.FromBMesh(bm_target)
     
-    # Try both normal directions
-    location1, normal1, index1, distance1 = bvh.find_nearest(local_point)
+    # Find nearest point
+    location, normal, index, distance = bvh.find_nearest(local_point)
     
-    # Try ray casting in both directions
-    ray_location1, ray_normal1, ray_index1, ray_dist1 = bvh.ray_cast(local_point, face_normal)
-    ray_location2, ray_normal2, ray_index2, ray_dist2 = bvh.ray_cast(local_point, -face_normal)
+    # Try ray casting in face normal direction only
+    ray_location, ray_normal, ray_index, ray_dist = bvh.ray_cast(local_point, local_normal)
     
     bm_target.free()
     
-    # Collect all valid results
+    # Collect valid results (only consider points with front-facing normals)
     results = []
-    if location1 is not None:
-        world_loc1 = target_obj.matrix_world @ location1
-        results.append((world_loc1, distance1))
-    if ray_location1 is not None:
-        world_loc2 = target_obj.matrix_world @ ray_location1
-        results.append((world_loc2, ray_dist1))
-    if ray_location2 is not None:
-        world_loc3 = target_obj.matrix_world @ ray_location2
-        results.append((world_loc3, ray_dist2))
+    if location is not None and normal is not None:
+        # Convert normal to world space for comparison
+        world_normal = (target_obj.matrix_world.transposed().inverted() @ normal).normalized()
+        # Check if the normal is front-facing relative to our face normal
+        if face_normal.dot(world_normal) > 0:  # positive dot product means same direction
+            world_loc = target_obj.matrix_world @ location
+            results.append((world_loc, distance))
+            
+    if ray_location is not None and ray_normal is not None:
+        world_normal = (target_obj.matrix_world.transposed().inverted() @ ray_normal).normalized()
+        if face_normal.dot(world_normal) > 0:
+            world_loc = target_obj.matrix_world @ ray_location
+            results.append((world_loc, ray_dist))
     
     if not results:
         return None
     
-    # Find the closest point among all valid results
+    # Find the closest point among valid results
     closest_location, min_distance = min(results, key=lambda x: x[1])
     
     if min_distance > max_distance and max_distance > 0:
@@ -325,9 +329,22 @@ def get_closest_point_on_target(point, target_obj, face_normal, max_distance):
 def measure_diagonal_distance(face, vert1, vert2, target_obj, max_distance):
     """
     Measure the distance from a potential diagonal to the target surface.
-    Uses closest point on target surface from the diagonal center point.
+    Only considers front-facing surfaces on the target object.
     """
     if not target_obj:
+        return float('inf')
+    
+    # Check for degenerate geometry conditions
+    if is_degenerate_face(face):
+        update_debug_info(bpy.context, ["Warning: Degenerate face detected (zero area or invalid normal)"])
+        return float('inf')
+    
+    if has_zero_length_edges(face):
+        update_debug_info(bpy.context, ["Warning: Zero-length edges detected"])
+        return float('inf')
+        
+    if has_self_intersection(face, vert1, vert2):
+        update_debug_info(bpy.context, ["Warning: Self-intersecting diagonal detected"])
         return float('inf')
     
     # Get all vertices of the quad face
@@ -336,26 +353,31 @@ def measure_diagonal_distance(face, vert1, vert2, target_obj, max_distance):
     # Calculate center point of the diagonal
     diagonal_center = (vert1.co + vert2.co) / 2
     
+    # Calculate face normal for front-face checking
+    face_normal = face.normal
+    
     # Get the source object (the object being modified)
     source_obj = bpy.context.active_object
     
-    # Convert diagonal center to world space using SOURCE object's matrix
+    # Convert diagonal center to world space
     diagonal_center_world = source_obj.matrix_world @ diagonal_center
+    face_normal_world = (source_obj.matrix_world.to_3x3() @ face_normal).normalized()
     
-    # Create BVHTree for target object
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    target_eval = target_obj.evaluated_get(depsgraph)
-    
-    # Create BVHTree from target mesh
-    bvh = BVHTree.FromObject(target_eval, depsgraph)
-    
-    # Find closest point on target surface
-    closest_point, normal, index, distance = bvh.find_nearest(diagonal_center_world)
+    # Get closest point (only considering front-facing surfaces)
+    closest_point = get_closest_point_on_target(diagonal_center_world, target_obj, face_normal_world, max_distance)
     
     if closest_point is None:
+        update_debug_info(bpy.context, ["Warning: No valid front-facing surface found on target"])
         return float('inf')
     
-    # Update debug info with more precise information
+    # Calculate distance
+    distance = (closest_point - diagonal_center_world).length
+    
+    # If the face is nearly coplanar, adjust the distance threshold
+    if is_nearly_coplanar(face):
+        distance *= 1.1  # 10% increase in effective distance
+        
+    # Update debug info
     debug_lines = [
         f"World center: ({diagonal_center_world.x:.3f}, {diagonal_center_world.y:.3f}, {diagonal_center_world.z:.3f})",
         f"Closest point: ({closest_point.x:.3f}, {closest_point.y:.3f}, {closest_point.z:.3f})",
@@ -364,6 +386,57 @@ def measure_diagonal_distance(face, vert1, vert2, target_obj, max_distance):
     update_debug_info(bpy.context, debug_lines)
     
     return distance
+
+# Geometry validation functions
+def is_degenerate_face(face):
+    """Check if a face is degenerate (zero area or invalid normal)."""
+    normal = face.normal
+    area = face.calc_area()
+    
+    # Check for zero area or invalid normal
+    if area < 1e-7 or normal.length < 1e-7:
+        return True
+        
+    # Check for collinear vertices
+    verts = list(face.verts)
+    v1 = verts[1].co - verts[0].co
+    v2 = verts[2].co - verts[0].co
+    if v1.cross(v2).length < 1e-7:
+        return True
+        
+    return False
+
+def has_self_intersection(face, vert1, vert2):
+    """Check if the proposed diagonal intersects with any face edges."""
+    diagonal = vert2.co - vert1.co
+    
+    for edge in face.edges:
+        if edge.verts[0] not in (vert1, vert2) and edge.verts[1] not in (vert1, vert2):
+            edge_vec = edge.verts[1].co - edge.verts[0].co
+            if diagonal.cross(edge_vec).length < 1e-7:
+                # Check if intersection point lies within both line segments
+                return True
+    return False
+
+def is_nearly_coplanar(face, threshold=1e-5):
+    """Check if all vertices are nearly coplanar."""
+    verts = list(face.verts)
+    normal = face.normal
+    
+    # Check distance of each vertex to the plane defined by the first three vertices
+    plane_co = verts[0].co
+    for vert in verts[1:]:
+        dist = abs(normal.dot(vert.co - plane_co))
+        if dist > threshold:
+            return False
+    return True
+
+def has_zero_length_edges(face):
+    """Check if any edges have zero length."""
+    for edge in face.edges:
+        if (edge.verts[0].co - edge.verts[1].co).length < 1e-7:
+            return True
+    return False
 
 def update_debug_info(context, info_lines):
     """Update debug information in a safe way"""
